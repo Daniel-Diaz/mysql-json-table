@@ -1,2 +1,54 @@
+----------------------------------------------------------------------------------------------------
+module Database.MySQL.JSONTable
+  ( ID
+  , JSONTable (..)
+  , createTable
+    ) where
 
-module Database.MySQL.JSONTable () where
+import Data.Word
+import Data.String (fromString)
+import Data.Text (Text)
+import Database.MySQL.Simple qualified as SQL
+
+-- | Row identifier used for table lookups.
+--   The type parameter indicates the type of data
+--   stored in the table.
+newtype ID a = ID { fromID :: Word64 }
+
+-- | A MySQL table with two columns:
+--
+-- +----------------------------+-----------+
+-- |             id             |    data   |
+-- +============================+===========+
+-- | Row identifier (type 'ID') | JSON data |
+-- +----------------------------+-----------+
+--
+-- The type parameter indicates the type of data
+--  stored in the table.
+data JSONTable a = JSONTable
+  { -- | Table name.
+    tableName :: Text
+    }
+
+tableSpecs :: String
+tableSpecs = concat
+  [ "("
+  , "id BIGINT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT"
+  , ", "
+  , "data JSON"
+  , ")"
+    ]
+
+-- | Create a new JSON table in a MySQL database.
+createTable
+  :: SQL.Connection -- ^ MySQL database connection.
+  -> Bool -- ^ Fail if table already exists.
+  -> Text -- ^ Table name.
+  -> IO (JSONTable a)
+createTable conn failIfExists name = do
+  let ifNotExists = if failIfExists then " " else " IF NOT EXISTS "
+      query = "CREATE TABLE" ++ ifNotExists ++ "? " ++ tableSpecs
+  _ <- SQL.execute conn (fromString query) $ SQL.Only name
+  pure $ JSONTable
+    { tableName = name
+      }
