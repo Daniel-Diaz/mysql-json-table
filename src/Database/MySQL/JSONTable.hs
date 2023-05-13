@@ -2,6 +2,7 @@
 module Database.MySQL.JSONTable
   ( -- * Types
     Id
+  , Row (..)
   , JSONTable (..)
     -- * Table operations
   , createTable
@@ -11,29 +12,51 @@ module Database.MySQL.JSONTable
   , lookup
   , adjust
   , delete
+    -- * Streaming
+  , sourceRows
     ) where
 
 import Prelude hiding (lookup)
 import Data.Word
 import Data.String (fromString)
+import Text.Read (readEither)
 import Data.Maybe (listToMaybe)
 import Data.Typeable (Typeable)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when, unless)
+import Control.Monad.IO.Class (liftIO)
 import Data.ByteString qualified as ByteString
+import Data.ByteString.Char8 qualified as CByteString
 import Database.MySQL.Simple qualified as SQL
-import Database.MySQL.Base.Types qualified as SQLTypes
+import Database.MySQL.Simple.QueryResults qualified as SQL
+import Database.MySQL.Base qualified as SQLBase
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Aeson qualified as JSON
+import Data.Conduit (ConduitT)
+import Conduit (ResourceT)
+import Data.Conduit qualified as Conduit
 
 -- | Row identifier used for table lookups.
 --   The type parameter indicates the type of data
 --   stored in the table.
-newtype Id a = Id { fromId :: Word64 } deriving (Eq, Ord, Show)
+newtype Id a = Id { fromId :: Word64 } deriving (Eq, Ord, Show, ToJSON, FromJSON)
+
+instance SQL.FromField (Id a) where
+  fromField = ([SQLBase.LongLong], fmap Id . readEither . CByteString.unpack)
+
+instance Typeable a => SQL.Result (Id a)
 
 instance SQL.ToField (Id a) where
   toField = fromString . show . fromId
 
 instance SQL.Param (Id a)
+
+-- | A single row.
+data Row a = Row
+  { -- | Row identifier.
+    rowId :: Id a
+    -- | Row data.
+  , rowData :: a
+    } deriving Show
 
 -- | A MySQL table with two columns:
 --
@@ -89,7 +112,7 @@ deleteTable conn failIfNotExist table = do
 newtype AsJSON a = AsJSON { asJSON :: a }
 
 instance FromJSON a => SQL.FromField (AsJSON a) where
-  fromField = ([SQLTypes.Json], fmap AsJSON . JSON.eitherDecodeStrict)
+  fromField = ([SQLBase.Json], fmap AsJSON . JSON.eitherDecodeStrict)
 
 instance ToJSON a => SQL.ToField (AsJSON a) where
   toField = ByteString.toStrict . JSON.encode . asJSON
@@ -148,3 +171,25 @@ delete conn table i = do
   let query = "DELETE FROM `" ++ tableName table ++ "` WHERE id=?"
   _ <- SQL.execute conn (fromString query) $ SQL.Only i
   pure ()
+
+-- | Stream all rows using a conduit.
+sourceRows
+  :: (Typeable a, FromJSON a)
+  => SQL.Connection -- ^ MySQL database connection.
+  -> JSONTable a -- ^ Table to stream rows from.
+  -> ConduitT i (Row a) (ResourceT IO) ()
+sourceRows conn table = do
+  let query = "SELECT * FROM `" ++ tableName table ++ "`"
+  liftIO $ SQLBase.query conn $ fromString query
+  Conduit.bracketP (SQLBase.useResult conn) SQLBase.freeResult $ \result -> do
+    fields <- liftIO $ do
+      ncols <- SQLBase.fieldCount $ Right result
+      when (ncols == 0) $ fail "Query error: Result has no columns."
+      SQLBase.fetchFields result
+    let loop = do
+          row <- liftIO $ SQLBase.fetchRow result
+          unless (null row) $ do
+            let (i,AsJSON x) = SQL.convertResults fields row
+            Conduit.yield $ Row i x
+            loop
+    loop
