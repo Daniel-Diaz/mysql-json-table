@@ -8,6 +8,7 @@ module Database.MySQL.JSONTable
 import Data.Word
 import Data.String (fromString)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Database.MySQL.Simple qualified as SQL
 
 -- | Row identifier used for table lookups.
@@ -47,8 +48,8 @@ createTable
   -> IO (JSONTable a)
 createTable conn failIfExists name = do
   let ifNotExists = if failIfExists then " " else " IF NOT EXISTS "
-      query = "CREATE TABLE" ++ ifNotExists ++ "? " ++ tableSpecs
-  _ <- SQL.execute conn (fromString query) $ SQL.Only name
+      query = "CREATE TABLE" ++ ifNotExists ++ "`" ++ Text.unpack name ++ "` " ++ tableSpecs
+  _ <- SQL.execute conn (fromString query) ()
   pure $ JSONTable
     { tableName = name
       }

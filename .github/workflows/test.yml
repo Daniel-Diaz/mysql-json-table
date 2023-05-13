@@ -9,4 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
+    - uses: actions/cache@v3
+      with:
+        path: ~/.stack
+        key: global-stack
     - run: ./script/test
