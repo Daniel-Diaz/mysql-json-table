@@ -21,5 +21,9 @@ main = do
   table <- createTable conn True "int-table"
   let half :: Ratio Int
       half = 1 % 2
-  x <- insert conn table half >>= lookup conn table
+  i <- insert conn table half
+  x <- lookup conn table i
   unless (x == Just half) $ fail $ "Insert-Lookup test failed: got " ++ show x
+  adjust conn table (pure . (+1)) i
+  y <- lookup conn table i
+  unless (y == Just (half + 1)) $ fail $ "Update-Lookup test failed: got " ++ show y

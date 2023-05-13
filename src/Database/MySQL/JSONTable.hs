@@ -9,6 +9,7 @@ module Database.MySQL.JSONTable
     -- * Row operations
   , insert
   , lookup
+  , adjust
     ) where
 
 import Prelude hiding (lookup)
@@ -110,9 +111,29 @@ insert conn table x = do
 lookup
   :: (Typeable a, FromJSON a)
   => SQL.Connection -- ^ MySQL database connection.
-  -> JSONTable a -- ^ Table to insert the new row.
+  -> JSONTable a -- ^ Table for lookup.
   -> Id a -- ^ Identifier to use for the table lookup.
   -> IO (Maybe a)
 lookup conn table i = do
   let query = "SELECT data FROM `" ++ tableName table ++ "` WHERE id=?"
   fmap (asJSON . SQL.fromOnly) . listToMaybe <$> SQL.query conn (fromString query) (SQL.Only i)
+
+-- | Update a row by applying the supplied function. If the row doesn't exist,
+--   it does nothing.
+adjust
+  :: (Typeable a, FromJSON a, ToJSON a)
+  => SQL.Connection -- ^ MySQL database connection.
+  -> JSONTable a
+  -> (a -> IO a) -- ^ Update function.
+  -> Id a
+  -> IO ()
+adjust conn table f i = SQL.withTransaction conn $ do
+  let query1 = "SELECT data FROM `" ++ tableName table ++ "` WHERE id=? FOR SHARE"
+  mr <- listToMaybe <$> SQL.query conn (fromString query1) (SQL.Only i)
+  case mr of
+    Nothing -> pure ()
+    Just (SQL.Only (AsJSON x)) -> do
+      y <- f x
+      let query2 = "UPDATE `" ++ tableName table ++ "` SET data=? WHERE id=?"
+      _ <- SQL.execute conn (fromString query2) (AsJSON y,i)
+      pure ()
