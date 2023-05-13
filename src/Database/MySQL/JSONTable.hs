@@ -12,6 +12,7 @@ module Database.MySQL.JSONTable
   , lookup
   , adjust
   , delete
+  , replace
     -- * Streaming
   , sourceRows
     ) where
@@ -22,6 +23,7 @@ import Data.String (fromString)
 import Text.Read (readEither)
 import Data.Maybe (listToMaybe)
 import Data.Typeable (Typeable)
+import Control.Applicative (liftA2)
 import Control.Monad (forM_, when, unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString qualified as ByteString
@@ -56,7 +58,14 @@ data Row a = Row
     rowId :: Id a
     -- | Row data.
   , rowData :: a
-    } deriving Show
+    } deriving (Eq, Show)
+
+instance FromJSON a => FromJSON (Row a) where
+  parseJSON = JSON.withObject "Row" $ \o ->
+    liftA2 Row (o JSON..: "id") (o JSON..: "data")
+
+instance ToJSON a => ToJSON (Row a) where
+  toJSON (Row i x) = JSON.object ["id" JSON..= i, "data" JSON..= x]
 
 -- | A MySQL table with two columns:
 --
@@ -160,6 +169,19 @@ adjust conn table f i = SQL.withTransaction conn $ do
     let query2 = "UPDATE `" ++ tableName table ++ "` SET data=? WHERE id=?"
     _ <- SQL.execute conn (fromString query2) (AsJSON y,i)
     pure ()
+
+-- | Replace the current value of a row. It does nothing if the row doesn't exist.
+replace
+  :: ToJSON a
+  => SQL.Connection -- ^ MySQL database connection.
+  -> JSONTable a
+  -> Id a -- ^ Row identifier.
+  -> a -- ^ New value.
+  -> IO ()
+replace conn table i x = do
+  let query = "UPDATE `" ++ tableName table ++ "` SET data=? WHERE id=?"
+  _ <- SQL.execute conn (fromString query) (AsJSON x,i)
+  pure ()
 
 -- | Delete a row from a table. It does nothing if the row doesn't exist.
 delete

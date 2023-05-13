@@ -18,7 +18,7 @@ library
     , GeneralizedNewtypeDeriving
   ghc-options: -Wall -Wunused-packages
   build-depends:
-      base, containers, mysql, mysql-simple, aeson, bytestring
+      base, mysql, mysql-simple, aeson, bytestring
     , conduit
   exposed-modules: Database.MySQL.JSONTable
 
