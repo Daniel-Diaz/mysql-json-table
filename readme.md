@@ -4,9 +4,9 @@ Using mysql to store id-to-json tables.
 
 A table would look something like this:
 
-|     id       |      data       |
-|--------------|-----------------|
-| `SQL.iden a` | `JSON.encode a` |
+|       id       |        data        |
+|----------------|--------------------|
+| Row identifier | JSON-encoded value |
 
 ## Why would you do this?
 
