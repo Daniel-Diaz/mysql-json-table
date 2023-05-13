@@ -10,6 +10,7 @@ module Database.MySQL.JSONTable
   , insert
   , lookup
   , adjust
+  , delete
     ) where
 
 import Prelude hiding (lookup)
@@ -17,6 +18,7 @@ import Data.Word
 import Data.String (fromString)
 import Data.Maybe (listToMaybe)
 import Data.Typeable (Typeable)
+import Control.Monad (forM_)
 import Data.ByteString qualified as ByteString
 import Database.MySQL.Simple qualified as SQL
 import Database.MySQL.Base.Types qualified as SQLTypes
@@ -130,10 +132,19 @@ adjust
 adjust conn table f i = SQL.withTransaction conn $ do
   let query1 = "SELECT data FROM `" ++ tableName table ++ "` WHERE id=? FOR SHARE"
   mr <- listToMaybe <$> SQL.query conn (fromString query1) (SQL.Only i)
-  case mr of
-    Nothing -> pure ()
-    Just (SQL.Only (AsJSON x)) -> do
-      y <- f x
-      let query2 = "UPDATE `" ++ tableName table ++ "` SET data=? WHERE id=?"
-      _ <- SQL.execute conn (fromString query2) (AsJSON y,i)
-      pure ()
+  forM_ mr $ \(SQL.Only (AsJSON x)) -> do
+    y <- f x
+    let query2 = "UPDATE `" ++ tableName table ++ "` SET data=? WHERE id=?"
+    _ <- SQL.execute conn (fromString query2) (AsJSON y,i)
+    pure ()
+
+-- | Delete a row from a table. It does nothing if the row doesn't exist.
+delete
+  :: SQL.Connection -- ^ MySQL database connection.
+  -> JSONTable a -- ^ Table to delete the row from.
+  -> Id a -- ^ Identifier of the row to delete.
+  -> IO ()
+delete conn table i = do
+  let query = "DELETE FROM `" ++ tableName table ++ "` WHERE id=?"
+  _ <- SQL.execute conn (fromString query) $ SQL.Only i
+  pure ()

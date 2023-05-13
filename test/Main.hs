@@ -27,3 +27,6 @@ main = do
   adjust conn table (pure . (+1)) i
   y <- lookup conn table i
   unless (y == Just (half + 1)) $ fail $ "Update-Lookup test failed: got " ++ show y
+  delete conn table i
+  z <- lookup conn table i
+  unless (z == Nothing) $ fail $ "Delete-Lookup test failed: got " ++ show z
