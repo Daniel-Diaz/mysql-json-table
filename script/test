@@ -2,6 +2,8 @@
 
 set -e
 
+# Start mysql
+sudo /etc/init.d/mysql start
 echo 'CREATE DATABASE IF NOT EXISTS `json-table-test`;' > mysql
 
 # Run stack init when stack.yaml is missing.
