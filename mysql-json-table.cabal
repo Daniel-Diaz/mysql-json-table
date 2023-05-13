@@ -13,9 +13,12 @@ cabal-version: >= 1.10
 library
   hs-source-dirs: src
   default-language: Haskell2010
-  default-extensions: ImportQualifiedPost, OverloadedStrings
+  default-extensions:
+      ImportQualifiedPost, OverloadedStrings
+    , GeneralizedNewtypeDeriving
   ghc-options: -Wall -Wunused-packages
-  build-depends: base, containers, mysql-simple, text, aeson
+  build-depends:
+    base, containers, mysql, mysql-simple, aeson, bytestring
   exposed-modules: Database.MySQL.JSONTable
 
 executable mysql-json-table-test
