@@ -11,6 +11,7 @@ main = do
     , SQL.connectUser = "root"
     , SQL.connectPassword = "root"
       })
-  table <- createTable conn True "int-table"
+  table <- createTable conn True "create-delete-table"
   _ <- createTable conn False $ tableName table
-  pure ()
+  deleteTable conn True table
+  deleteTable conn False table

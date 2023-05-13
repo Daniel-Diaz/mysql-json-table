@@ -3,6 +3,7 @@ module Database.MySQL.JSONTable
   ( ID
   , JSONTable (..)
   , createTable
+  , deleteTable
     ) where
 
 import Data.Word
@@ -48,8 +49,20 @@ createTable
   -> IO (JSONTable a)
 createTable conn failIfExists name = do
   let ifNotExists = if failIfExists then " " else " IF NOT EXISTS "
-      query = "CREATE TABLE" ++ ifNotExists ++ "`" ++ Text.unpack name ++ "` " ++ tableSpecs
-  _ <- SQL.execute conn (fromString query) ()
+      query = "CREATE TABLE" ++ ifNotExists ++ "? " ++ tableSpecs
+  _ <- SQL.execute conn (fromString query) $ SQL.Only name
   pure $ JSONTable
     { tableName = name
       }
+
+-- | Delete a JSON table from a MySQL database.
+deleteTable
+  :: SQL.Connection -- ^ MySQL database connection.
+  -> Bool -- ^ Fail if table doesn't exist.
+  -> JSONTable a 
+  -> IO ()
+deleteTable conn failIfNotExist table = do
+  let ifExists = if failIfNotExist then " " else " IF EXISTS "
+      query = "DROP TABLE" ++ ifExists ++ "?"
+  _ <- SQL.execute conn (fromString query) $ SQL.Only $ tableName table
+  pure ()
