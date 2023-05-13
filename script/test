@@ -4,4 +4,11 @@ set -e
 
 echo 'CREATE DATABASE IF NOT EXISTS `json-table-test`;' > mysql
 
+# Run stack init when stack.yaml is missing.
+if [ ! -f stack.yaml ]
+then
+  stack init
+fi
+
+# Build and run test
 stack build && stack run mysql-json-table-test
