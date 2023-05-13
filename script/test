@@ -2,6 +2,6 @@
 
 set -e
 
-mysql < echo 'CREATE DATABASE IF NOT EXISTS `json-table-test`;'
+echo 'CREATE DATABASE IF NOT EXISTS `json-table-test`;' > mysql
 
 stack build && stack run mysql-json-table-test
