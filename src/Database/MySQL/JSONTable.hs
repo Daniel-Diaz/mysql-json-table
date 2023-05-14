@@ -36,6 +36,7 @@ module Database.MySQL.JSONTable
   , insertId
   , lookupId
   , adjustId
+  , alterId
   , deleteId
   , replaceId
     -- ** Streaming
@@ -359,6 +360,39 @@ adjustId conn itable f k = SQL.withTransaction conn $ do
     let query2 = "UPDATE `" ++ idTableName itable ++ "` SET id=? WHERE key=?"
     _ <- SQL.execute conn (fromString query2) (j,Key k)
     pure ()
+
+-- | Alter an 'Id' by applying the supplied function, either inserting it, removing
+--   it, or updating it.
+alterId
+  :: (SQL.ToField key, Typeable a)
+  => SQL.Connection -- ^ MySQL database connection.
+  -> IdTable key a
+  -> (Maybe (Id a) -> IO (Maybe (Id a))) -- ^ Update function.
+  -> key
+  -> IO ()
+alterId conn itable f k = SQL.withTransaction conn $ do
+  let query1 = "SELECT id FROM `" ++ idTableName itable ++ "` WHERE key=? FOR SHARE"
+  mi <- fmap SQL.fromOnly . listToMaybe <$> SQL.query conn (fromString query1) (SQL.Only $ Key k)
+  case mi of
+    Nothing -> do
+      mj <- f mi
+      case mj of
+        Nothing -> pure ()
+        Just j -> do
+          let query2 = "INSERT INTO `" ++ idTableName itable ++ "` (key,id) VALUES (?,?)"
+          _ <- SQL.execute conn (fromString query2) (Key k,j)
+          pure ()
+    _ -> do
+      mj <- f mi
+      case mj of
+        Nothing -> do
+          let query2 = "DELETE FROM `" ++ idTableName itable ++ "` WHERE key=?"
+          _ <- SQL.execute conn (fromString query2) $ SQL.Only $ Key k
+          pure ()
+        Just j -> do
+          let query2 = "UPDATE `" ++ idTableName itable ++ "` SET id=? WHERE key=?"
+          _ <- SQL.execute conn (fromString query2) (j,Key k)
+          pure ()
 
 -- | Delete an Id from and Id table. It does nothing if the key is not found.
 deleteId
