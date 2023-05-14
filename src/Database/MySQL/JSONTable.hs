@@ -160,7 +160,7 @@ instance ToJSON a => SQL.Param (AsJSON a)
 -- | Insert a new row into a table.
 --
 --   /Warning:/ It is recommended not to call 'insert' with the same 'SQL.Connection'
---   parameter from multiple threads. The 'Id's returned might get mixed up.
+--   argument from multiple threads. The 'Id's returned might get mixed up.
 --   If you need to call 'insert' from multiple threads, use a different
 --   'SQL.Connection' on each thread.
 insert
