@@ -15,7 +15,8 @@ library
   default-language: Haskell2010
   default-extensions:
       ImportQualifiedPost, OverloadedStrings
-    , GeneralizedNewtypeDeriving
+    , GeneralizedNewtypeDeriving, TypeApplications
+    , ScopedTypeVariables
   ghc-options: -Wall -Wunused-packages
   build-depends:
       base, mysql, mysql-simple, aeson, bytestring

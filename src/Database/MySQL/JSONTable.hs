@@ -10,29 +10,46 @@
 -- +----------------------------+--------------------+
 --
 module Database.MySQL.JSONTable
-  ( -- * Types
+  ( -- * JSON tables
+    -- ** Types
     Id
   , Row (..)
   , JSONTable (..)
-    -- * Table operations
+    -- ** Table operations
   , createTable
   , deleteTable
-    -- * Row operations
+    -- ** Row operations
   , insert
   , lookup
   , adjust
   , delete
   , replace
-    -- * Streaming
+    -- ** Streaming
   , sourceRows
+    -- * Id tables
+    -- ** Types
+  , IdTable (..)
+    -- ** Table operations
+  , createIdTable
+  , deleteIdTable
+    -- ** Row operations
+  , insertId
+  , lookupId
+  , adjustId
+  , deleteId
+  , replaceId
+    -- ** Streaming
+  , sourceIds
     ) where
 
 import Prelude hiding (lookup)
 import Data.Word
 import Data.String (fromString)
+import Data.Char (toUpper)
 import Text.Read (readEither)
 import Data.Maybe (listToMaybe)
 import Data.Typeable (Typeable)
+import Data.Proxy
 import Control.Applicative (liftA2)
 import Control.Monad (forM_, when, unless)
 import Control.Monad.IO.Class (liftIO)
@@ -97,7 +114,7 @@ tableSpecs = concat
   [ "("
   , "id BIGINT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT"
   , ", "
-  , "data JSON"
+  , "data JSON NOT NULL"
   , ")"
     ]
 
@@ -228,5 +245,165 @@ sourceRows conn table = do
           unless (null row) $ do
             let (i,AsJSON x) = SQL.convertResults fields row
             Conduit.yield $ Row i x
+            loop
+    loop
+
+-- | Lookup key in an 'Id' table.
+newtype Key key = Key key deriving (SQL.FromField, SQL.ToField)
+
+instance (Typeable key, SQL.FromField key) => SQL.Result (Key key)
+instance SQL.ToField key => SQL.Param (Key key)
+
+-- | Table that stores a map from keys to row identifiers from
+--   some 'JSONTable'. It has the following shape:
+--
+-- +------------------------+----------------------------+
+-- |          key           |            id              |
+-- +========================+============================+
+-- | User-provided key type | Row identifier (type 'Id') |
+-- +------------------------+----------------------------+
+--
+data IdTable key a = IdTable
+  { -- | Table name.
+    idTableName :: String
+    }
+
+typeToSpec :: SQLBase.Type -> String
+typeToSpec SQLBase.Tiny = "TINYINT"
+typeToSpec SQLBase.Short = "SMALLINT"
+typeToSpec SQLBase.Int24 = "MEDIUMINT"
+typeToSpec SQLBase.Long = "INT"
+typeToSpec SQLBase.LongLong = "BIGINT"
+typeToSpec SQLBase.NewDate = "DATE"
+typeToSpec SQLBase.NewDecimal = "DECIMAL"
+typeToSpec t = fmap toUpper $ show t
+
+idTableSpecs :: forall proxy key . SQL.FromField key => proxy key -> String
+idTableSpecs _ = concat
+  [ "("
+  , "key " ++ typeToSpec (head $ fst (SQL.fromField @key)) ++ " NOT NULL PRIMARY KEY"
+  , ", "
+  , "id BIGINT UNSIGNED NOT NULL"
+  , ")"
+    ]
+
+-- | Create a new Id table in a MySQL database.
+--
+--   The type of the @key@ column will be set to the first type listed in
+--   'SQL.fromField'.
+createIdTable
+  :: forall key a
+   . SQL.FromField key
+  => SQL.Connection -- ^ MySQL database connection.
+  -> Bool -- ^ Fail if table already exists.
+  -> String -- ^ Table name.
+  -> IO (IdTable key a)
+createIdTable conn failIfExists name = do
+  let ifNotExists = if failIfExists then " " else " IF NOT EXISTS "
+      query = "CREATE TABLE" ++ ifNotExists ++ "`" ++ name ++ "` " ++ idTableSpecs (Proxy @key)
+  _ <- SQL.execute conn (fromString query) ()
+  pure $ IdTable
+    { idTableName = name
+      }
+
+-- | Delete an Id table from a MySQL database, together with all of its content.
+deleteIdTable
+  :: SQL.Connection -- ^ MySQL database connection.
+  -> Bool -- ^ Fail if table doesn't exist.
+  -> IdTable key a 
+  -> IO ()
+deleteIdTable conn failIfNotExist itable = do
+  let ifExists = if failIfNotExist then " " else " IF EXISTS "
+      query = "DROP TABLE" ++ ifExists ++ "`" ++ idTableName itable ++ "`"
+  _ <- SQL.execute conn (fromString query) ()
+  pure ()
+
+-- | Insert a new Id into an Id table.
+insertId
+  :: SQL.ToField key
+  => SQL.Connection
+  -> IdTable key a
+  -> key
+  -> Id a
+  -> IO ()
+insertId conn itable k i = do
+  let query = "INSERT INTO `" ++ idTableName itable ++ "` (key,id) VALUES (?,?)"
+  _ <- SQL.execute conn (fromString query) (Key k, i)
+  pure ()
+
+-- | Id table lookup.
+lookupId
+  :: (SQL.ToField key, Typeable a)
+  => SQL.Connection
+  -> IdTable key a
+  -> key
+  -> IO (Maybe (Id a))
+lookupId conn itable k = do
+  let query = "SELECT id FROM `" ++ idTableName itable ++ "` WHERE key=?"
+  fmap SQL.fromOnly . listToMaybe <$> SQL.query conn (fromString query) (SQL.Only $ Key k)
+
+-- | Update an 'Id' by applying the supplied function. If the key is not found,
+--   it does nothing.
+adjustId
+  :: (SQL.ToField key, Typeable a)
+  => SQL.Connection -- ^ MySQL database connection.
+  -> IdTable key a
+  -> (Id a -> IO (Id a)) -- ^ Update function.
+  -> key
+  -> IO ()
+adjustId conn itable f k = SQL.withTransaction conn $ do
+  let query1 = "SELECT id FROM `" ++ idTableName itable ++ "` WHERE key=? FOR SHARE"
+  mr <- listToMaybe <$> SQL.query conn (fromString query1) (SQL.Only $ Key k)
+  forM_ mr $ \(SQL.Only i) -> do
+    j <- f i
+    let query2 = "UPDATE `" ++ idTableName itable ++ "` SET id=? WHERE key=?"
+    _ <- SQL.execute conn (fromString query2) (j,Key k)
+    pure ()
+
+-- | Delete an Id from and Id table. It does nothing if the key is not found.
+deleteId
+  :: SQL.ToField key
+  => SQL.Connection
+  -> IdTable key a
+  -> key
+  -> IO ()
+deleteId conn itable k = do
+  let query = "DELETE FROM `" ++ idTableName itable ++ "` WHERE id=?"
+  _ <- SQL.execute conn (fromString query) $ SQL.Only $ Key k
+  pure ()
+
+-- | Replace the 'Id' associated to the given key. It does nothing if the key
+--   isn't found.
+replaceId
+  :: SQL.ToField key
+  => SQL.Connection
+  -> IdTable key a
+  -> key
+  -> Id a
+  -> IO ()
+replaceId conn itable k i = do
+  let query = "UPDATE `" ++ idTableName itable ++ "` SET id=? WHERE key=?"
+  _ <- SQL.execute conn (fromString query) (i,Key k)
+  pure ()
+
+-- | Stream all ids using a conduit.
+sourceIds
+  :: (Typeable key, SQL.FromField key, Typeable a)
+  => SQL.Connection -- ^ MySQL database connection.
+  -> IdTable key a -- ^ Table to stream ids from.
+  -> ConduitT i (key, Id a) (ResourceT IO) ()
+sourceIds conn itable = do
+  let query = "SELECT * FROM `" ++ idTableName itable ++ "`"
+  liftIO $ SQLBase.query conn $ fromString query
+  Conduit.bracketP (SQLBase.useResult conn) SQLBase.freeResult $ \result -> do
+    fields <- liftIO $ do
+      ncols <- SQLBase.fieldCount $ Right result
+      when (ncols == 0) $ fail "Query error: Result has no columns."
+      SQLBase.fetchFields result
+    let loop = do
+          row <- liftIO $ SQLBase.fetchRow result
+          unless (null row) $ do
+            let (Key k,i) = SQL.convertResults fields row
+            Conduit.yield (k,i)
             loop
     loop
