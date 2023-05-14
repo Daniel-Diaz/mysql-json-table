@@ -1,4 +1,14 @@
 ----------------------------------------------------------------------------------------------------
+
+-- | Interface to use a MySQL table with a very specific format, where each row
+--   consists of a row identifier - used for lookups - and a JSON-encoded value.
+--
+-- +----------------------------+--------------------+
+-- |             id             |        data        |
+-- +============================+====================+
+-- | Row identifier (type 'Id') | JSON-encoded value |
+-- +----------------------------+--------------------+
+--
 module Database.MySQL.JSONTable
   ( -- * Types
     Id
@@ -130,6 +140,11 @@ instance (Typeable a, FromJSON a) => SQL.Result (AsJSON a)
 instance ToJSON a => SQL.Param (AsJSON a)
 
 -- | Insert a new row into a table.
+--
+--   /Warning:/ It is recommended not to call 'insert' with the same 'SQL.Connection'
+--   parameter from multiple threads. The 'Id's returned might get mixed up.
+--   If you need to call 'insert' from multiple threads, use a different
+--   'SQL.Connection' on each thread.
 insert
   :: ToJSON a
   => SQL.Connection -- ^ MySQL database connection.
