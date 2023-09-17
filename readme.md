@@ -1,3 +1,5 @@
+_Moved to GitLab: https://gitlab.com/daniel-casanueva/mysql-json-table_
+
 # mysql-json-table
 
 Using mysql to store id-to-json tables.
